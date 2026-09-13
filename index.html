@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>版本时光机</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", system-ui, sans-serif;
+    max-width: 620px; margin: 0 auto; padding: 16px;
+    background: #faf8f2; color: #333;
+  }
+  /* ── 房间切换：两个"房间"，谁有 .active 谁可见 ── */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  h1 { color: #6b4f2a; }
+  .toolbar { margin: 10px 0; }
+  button {
+    font-size: 14px; padding: 8px 14px; border-radius: 8px;
+    border: 1px solid #b9a882; background: #fff; cursor: pointer;
+  }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+
+
+  /* F1 列表页 */
+  #draftList { list-style: none; margin: 12px 0; padding: 0; }
+  .draft-card {
+    background: #fff; border: 1px solid #e5dcc8; border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 10px; cursor: pointer;
+  }
+  .draft-card:hover { background: #fdf6e8; }
+  .draft-name { font-size: 16px; font-weight: bold; margin-bottom: 4px; }
+  .draft-meta { font-size: 12px; color: #8a7a5c; margin-bottom: 4px; }
+  .draft-preview { font-size: 14px; color: #555; }
+  .empty { color: #999; text-align: center; margin-top: 40px; font-size: 15px; }
+
+  /* F2 新建面板 */
+  .new-panel {
+    background: #fff; border: 1px solid #e5dcc8; border-radius: 10px;
+    padding: 12px; margin-bottom: 12px;
+  }
+  .new-panel input {
+    width: 100%; margin-bottom: 8px; font-size: 14px; padding: 8px;
+    border: 1px solid #ccc; border-radius: 8px;
+  }
+  .new-panel .detail-row input { flex: 1; margin-bottom: 0; }
+
+  /* F3 详情页 */
+  #detailTitle { color: #6b4f2a; }
+  textarea {
+    width: 100%; min-height: 160px; font-size: 15px; line-height: 1.6;
+    padding: 10px; border: 1px solid #ccc; border-radius: 8px; resize: vertical;
+  }
+  .detail-row { margin-top: 10px; display: flex; gap: 8px; }
+  #remarkInput { flex: 1; font-size: 14px; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
+
+  /* F5 版本历史 */
+  #versionList { list-style: none; margin: 10px 0; padding: 0; }
+  .version-card {
+    background: #fff; border: 1px solid #e5dcc8; border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+  }
+  .version-card:hover { background: #fdf6e8; }
+  .version-head { font-size: 13px; color: #8a7a5c; margin-bottom: 6px; }
+  .version-body { font-size: 14px; color: #555; white-space: pre-wrap; }
+  .version-full { display: none; }                      /* 全文平时藏着 */
+  .version-card.open .version-brief { display: none; }  /* 展开后：摘要藏、全文露 */
+  .version-card.open .version-full  { display: block; }
+  .copy-btn { display: none; margin-top: 8px; font-size: 13px; padding: 4px 10px; }
+  .version-card.open .copy-btn { display: inline-block; }
+</style>
+</head>
+<body>
+
+
+<!-- ══════════ 房间 1：F1 稿子列表（主页） ══════════ -->
+<div id="listPage" class="page active">
+  <h1>🕰️ 版本时光机</h1>
+  <p style="color:#8a7a5c;font-size:13px">文案改来改去，旧版本找得回来。</p>
+  <div class="toolbar">
+    <button id="newDraftBtn" onclick="showNewPanel()">＋ 新建稿子</button>
+    <button onclick="exportJSON()">⬇ 导出全部数据</button>   <!-- F7 新增 -->
+  </div>
+
+  <!-- F2 新建面板：平时收起，点【＋新建稿子】才展开 -->
+  <div id="newDraftPanel" class="new-panel" hidden>
+    <input id="newName" placeholder="稿子名字（可空 → 未命名稿子）">
+    <textarea id="newContent" placeholder="粘贴第一版内容"></textarea>
+    <div class="detail-row">
+      <input id="newRemark" placeholder="备注（可选，如：初稿）">
+      <button id="createDraftBtn" onclick="createDraft()">保存</button>
+      <button onclick="hideNewPanel()">取消</button>
+    </div>
+  </div>
+  <ul id="draftList"></ul>
+</div>
+
+<!-- ══════════ 房间 2：F3 详情页·当前编辑区 ══════════ -->
+<div id="detailPage" class="page">
+  <button onclick="backToList()">← 返回列表</button>
+  <h2 id="detailTitle"></h2>
+  <textarea id="draftEditor" placeholder="最新版内容会显示在这里（存为新版本：D38）"></textarea>
+  <div class="detail-row">
+    <input id="remarkInput" placeholder="备注（可选，如：口语化）">
+    <button id="saveVersionBtn" onclick="saveNewVersion()">存为新版本</button>
+  </div>
+
+  <!-- ══════════ F5 版本历史：倒序列出全部版本 ══════════ -->
+  <h3 style="margin-top:22px">📜 版本历史 <span id="versionCount" style="font-size:13px;color:#8a7a5c"></span></h3>
+  <ul id="versionList"></ul>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+// 版本时光机 v0 · 骨架（D37）+ 核心 F2 新建稿子（D38 施工中）
+// 对照图纸：练习/inspiration-collector/index.html（灵感站 v2）
+// D38 施工：F2 新建稿子（8 空已填完）+ F4 存为新版本（5 空已填完）✅
+// D39 施工：F5 版本历史 + F6 复制此版本（6 空已填完）✅
+// D40 施工：F7 导出全部数据（4 空：_BLANK_1_ ~ _BLANK_4_，全在 exportJSON 里）
+// 在 VSCode 里按 Ctrl+F 搜 _BLANK_ 可以一次找到所有空
+// ═══════════════════════════════════════════
+
+const STORAGE_KEY = 'draftBox';   // 柜子钥匙：整摞稿子存在这一个 key 里
+
+// ── 全局状态：现在打开的是第几条稿子？（-1 = 没打开任何一条）──
+// F4 要用它：存新版本时得知道"往哪条稿子的版本们里塞卡"
+let currentDraftIndex = -1;
+
+// ── 数据层：读 = 打开柜子 → 拆包还原成数组 ──
+// （灵感站 loadIdeas 307 行几乎一模一样，抄它的结构）
+function loadDrafts() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+  } catch {
+    return [];   // 纸条坏了 → 当 0 条，页面不崩（防弹衣）
+  }
+}
+
+// ── 数据层：写 = 打包整摞稿子 → 塞进柜子 ──
+function saveDrafts(drafts) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(drafts));
+}
+
+// ── 渲染：F1 把整摞稿子画到列表页 ──
+function renderList() {
+  const drafts = loadDrafts();      // 用前先取（查的两条腿：取 → 画）
+  const listEl = document.getElementById('draftList');
+
+  if (drafts.length === 0) {        // 边界：一条稿子也没有 → 空状态
+    listEl.innerHTML = '<div class="empty">🕰️ 还没有稿子，先新建一个吧！</div>';
+    return;
+  }
+
+  listEl.innerHTML = drafts.map((d, i) => {
+    const last = d.版本们[d.版本们.length - 1];            // ★ 最新一版 = 版本卡摞最上面那张
+    const count = d.版本们.length;                    // 共几版
+    const preview = last.内容.length > 20 ? last.内容.slice(0, 20) + '…' : last.内容;
+    return `
+      <li class="draft-card" onclick="openDraft(${i})">
+        <div class="draft-name">${escapeHtml(d.名字)}</div>
+        <div class="draft-meta">${last.时间} · 共 ${count} 版</div>
+        <div class="draft-preview">${escapeHtml(preview)}</div>
+      </li>`;
+  }).join('');
+}
+
+// ── F3：点卡片 → 进详情页（灵感站 openDetail 383 行同款思路）──
+function openDraft(i) {
+  currentDraftIndex = i;            // ★ 进门先记下：我现在站在第 i 条稿子上
+  const drafts = loadDrafts();      // 用前先取
+  const draft = drafts[i];
+  if (!draft) return;               // 防弹衣：没找到这条就撤
+
+  document.getElementById('detailTitle').textContent = draft.名字;
+  const last = draft.版本们[draft.版本们.length - 1];   // 编辑框里装最新一版
+  document.getElementById('draftEditor').value = last.内容;
+
+  document.getElementById('detailPage').classList.add('active');
+  document.getElementById('listPage').classList.remove('active');
+
+  renderVersions();   // ← 进详情页时，版本历史也要跟着画出来
+}
+
+// ── F2：新建稿子（点【＋新建稿子】→ 填 → 保存）──
+function showNewPanel() {
+  document.getElementById('newName').value = '';
+  document.getElementById('newContent').value = '';
+  document.getElementById('newRemark').value = '';
+  document.getElementById('newDraftPanel').hidden = false;   // 把面板露出来
+  document.getElementById('newName').focus();                // 光标自动落到名字框
+}
+
+function hideNewPanel() {
+  document.getElementById('newDraftPanel').hidden = true;    // 收起来
+}
+
+function createDraft() {
+  // ① 从三个输入框收集用户填的东西
+  const name    = document.getElementById('newName').value.trim();
+  const content = document.getElementById('newContent').value;
+  const remark  = document.getElementById('newRemark').value.trim();
+
+  // ② 边界（图纸第 4 节）：内容为空 → 拦住，不许建
+  if (content.trim() === '') {
+    alert('内容为空，先写点东西再存吧');
+    return;
+  }
+
+  const drafts = loadDrafts();                      // 用前先取
+  const now = new Date().toLocaleString('zh-CN');   // 现在这一刻，写成文字
+
+  // ③ 造一条稿子：4 个格子（对照 SPEC 第 2 节）
+  const draft = {
+    id: Date.now(),        // 唯一编号（D25 学过的"时间戳"今天派上用场）
+    名字: name || '未命名稿子',       // 名字空着 → 给个兜底名（图纸：未命名稿子）
+    创建时间: now,
+    版本们: [
+      { 版号:1,  内容: content, 时间: now, 备注: remark }
+    ]
+  };
+
+  // ④ 放进账本 → 存柜子 → 收起面板 → 重画列表 → 进详情页
+  drafts.push(draft);              // 把 draft 放进 drafts 这摞里
+  saveDrafts(drafts);              // 把整摞存回柜子（不存 = 一刷新就没）
+  hideNewPanel();
+  renderList();
+  openDraft(drafts.length -1);   // 刚建的这条在数组的第几个？(提示: 下标!)
+}
+
+// ── F4：存为新版本（往"当前稿子"的版本们里塞一张新卡）──
+function saveNewVersion() {
+  const drafts = loadDrafts();                  // 用前先取
+  const draft  = drafts[currentDraftIndex];             // 当前这条稿子（全局变量记着的那个下标）
+  if (!draft) return;                           // 防弹衣：没找到就撤
+
+  const content = document.getElementById('draftEditor').value;
+  const remark  = document.getElementById('remarkInput').value.trim();
+
+  // 边界①（图纸第 4 节）：编辑框空 → 拦住
+  if (content.trim() === '') {
+    alert('内容为空，没东西可存');
+    return;
+  }
+
+  const last = draft.版本们[draft.版本们.length - 1];   // 最新一版（你今天默写过这行）
+  // 边界②：和最新一版一模一样 → 拦住（防手滑存出重复版）
+  if (last.内容 === content) {
+    alert('没有改动，不用存新版本');
+    return;
+  }
+
+  const now = new Date().toLocaleString('zh-CN');
+  const newCard = {
+    版号: draft.版本们.length + 1,        // 这是第几版？（提示：看现在已有几张卡）
+    内容: content,
+    时间: now,
+    备注: remark
+  };
+
+  draft.版本们.push(newCard);   // 塞进哪儿？"版本们"长在谁身上？
+  saveDrafts(drafts);        // 整摞存回柜子
+  renderList();              // 列表页的"共 N 版"要跟上
+  renderVersions();          // 存了新版本，下面的版本历史也要跟着更新
+
+  document.getElementById('draftEditor').value = '';   // 清空编辑框（防连点存出重复版）
+  document.getElementById('remarkInput').value = '';   // 备注也清掉
+  alert('已存为第 ' + newCard.版号 + ' 版');
+}
+
+// ── F5：画版本历史（最新的排最上面；点卡片展开全文）──
+function renderVersions() {
+  const draft = loadDrafts()[currentDraftIndex];   // 当前这条稿子（就是 Q4 那个全局变量）
+  if (!draft) return;
+
+  // ① 倒序：最新的排最上面。★ 直接 .reverse() 是"就地改"，会把账本本身翻个个儿！
+  const cards = [...draft.版本们].reverse();   // 提示：先复制一份再 reverse（想想 D25 排序那天的 [...]）
+
+  // ② 标题右边显示总数
+  document.getElementById('versionCount').textContent = '共 ' + cards.length + ' 版';
+
+  document.getElementById('versionList').innerHTML = cards.map(v => {
+    // ③ 摘要：内容前 40 字（句式照抄列表页那行，只是 20 → 40）
+    const brief = v.内容.length > 40 ? v.内容.slice(0, 40) + '…' : v.内容;
+    // ④ 备注：没填的显示"无备注"
+    const remark = (v.备注 && v.备注.trim()) ? v.备注 : '无备注';
+    return `<li class="version-card" id="ver-${v.版号}" onclick="toggleVersion(${v.版号})">
+      <div class="version-head">第 ${v.版号} 版 · ${escapeHtml(v.时间)} · ${escapeHtml(remark)}</div>
+      <div class="version-body version-brief">${escapeHtml(brief)}</div>
+      <div class="version-body version-full">${escapeHtml(v.内容)}</div>
+      <button class="copy-btn" onclick="event.stopPropagation(); copyVersion(${v.版号})">复制此版本</button>
+    </li>`;
+  }).join('');
+}
+
+// ── F5：点卡片 → 展开全文（再点收起）──
+function toggleVersion(版号) {
+  const card = document.getElementById('ver-' + 版号);
+  if (card) card.classList.toggle('open');   // 有 open 就去掉、没有就加上
+}
+
+// ── F6：把这一版全文送进剪贴板（SPEC 第 3 节 F6）──
+function copyVersion(版号) {
+  const draft = loadDrafts()[currentDraftIndex];
+  if (!draft) return;
+
+  // 编号 → 找到那张卡（find：从头往下找，第一个满足条件的就返回它）
+  const v = draft.版本们.find(x => x.版号 === 版号);
+  if (!v) return;
+
+  // navigator.clipboard = 浏览器给的"剪贴板"工具箱；writeText 干完活会"过一会儿才告诉你成没成"（Promise）
+  navigator.clipboard.writeText(v.内容).then(() => {
+    const btn = document.querySelector('#ver-' + 版号 + ' .copy-btn');
+    if (!btn) return;
+    btn.textContent = '已复制 ✓';
+    setTimeout(() => { btn.textContent = '复制此版本'; }, 1500);   // 1.5 秒后变回来
+  }).catch(() => {
+    alert('复制失败：这个浏览器不给用剪贴板，手动全选复制吧');   // SPEC 第 4 节的兜底
+  });
+}
+
+// ── F7：导出全部数据（SPEC 第 3 节 F7）——把整摞稿子打包下载成 JSON 文件 ──
+// 对照图纸：灵感站 exportJSON（你自己写过的那套 Blob 六步）
+function exportJSON() {
+  const drafts = loadDrafts();                    // 用前先取
+  if (drafts.length === 0) {                      // 【导师补丁】柜子空 → 别下载一个空文件
+    alert('柜子里还空着，没什么可导出的');
+    return;
+  }
+
+  const d = new Date();
+  const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+
+  const text = JSON.stringify(drafts, null, 2);        // ① 数据要出门，先干吗？（快递六步第①步）
+  const blob = new Blob([text], { type: 'application/json' }); // ② 装箱：这文件给谁看？行李箱选哪个
+  const url = URL.createObjectURL(blob);              // ③ 贴取件码（给全）
+  const a = document.createElement('a');              //    造一个隐形快递员（给全）
+  a.href = url;                                       // ④ 快递员拿码（给全）
+  a.download = 'draftbox-' + today + '.json'; // ⑤ 文件名：自己造一个值（'draftbox-' + 日期 + '.json'）
+  a.click();                                          // ⑥ 送货（给全）
+  URL.revokeObjectURL(url);                           // ⑦ 取件码用完要干什么？（不干会留垃圾）
+}
+
+// F8 雏形：← 返回列表（灵感站 closeDetail 395 行同款）
+function backToList() {
+  document.getElementById('detailPage').classList.remove('active');
+  document.getElementById('listPage').classList.add('active');
+}
+
+// ── 防弹衣：内容里的 < > 不会被当成 HTML 标签吃掉（灵感站同款）──
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ── 开机：一进来就把列表画出来 ──
+renderList();
+</script>
+</body>
+</html>
